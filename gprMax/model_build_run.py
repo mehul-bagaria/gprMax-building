@@ -260,13 +260,11 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
             G.initialise_dispersive_arrays()
 
         # Check there is sufficient memory to store any snapshots
+        # streaming snapshots: only need memory for one snapshot at a time
         if G.snapshots:
-            snapsmemsize = 0
-            for snap in G.snapshots:
-                # 2 x required to account for electric and magnetic fields
-                snapsmemsize += (2 * snap.datasizefield)
-            G.memoryusage += int(snapsmemsize)
-            G.memory_check(snapsmemsize=int(snapsmemsize))
+            maxsnap = max((2 * snap.datasizefield) for snap in G.snapshots)
+            G.memoryusage += int(maxsnap)   # optional
+            G.memory_check(snapsmemsize=int(maxsnap))
             if G.messages:
                 print('\nMemory (RAM) required - updated (snapshots): ~{}\n'.format(human_size(G.memoryusage)))
 
@@ -366,6 +364,15 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         if G.messages:
             print('\nOutput file: {}\n'.format(outputfile))
 
+        # Prepare snapshot output directory + filenames for streaming
+        if G.snapshots:
+            snapshotdir = os.path.join(G.inputdirectory, os.path.splitext(G.inputfilename)[0] + '_snaps' + appendmodelnumber)
+            if not os.path.exists(snapshotdir):
+                os.mkdir(snapshotdir)
+            for snap in G.snapshots:
+                snap.filename = os.path.abspath(os.path.join(snapshotdir, snap.basefilename + '.vti'))
+                snap.written = False
+
         # Main FDTD solving functions for either CPU or GPU
         if G.gpu is None:
             tsolve = solve_cpu(currentmodelrun, modelend, G)
@@ -376,19 +383,19 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         write_hdf5_outputfile(outputfile, G)
 
         # Write any snapshots to file
-        if G.snapshots:
-            # Create directory and construct filename from user-supplied name and model run number
-            snapshotdir = os.path.join(G.inputdirectory, os.path.splitext(G.inputfilename)[0] + '_snaps' + appendmodelnumber)
-            if not os.path.exists(snapshotdir):
-                os.mkdir(snapshotdir)
+        # if G.snapshots:
+        #     # Create directory and construct filename from user-supplied name and model run number
+        #     snapshotdir = os.path.join(G.inputdirectory, os.path.splitext(G.inputfilename)[0] + '_snaps' + appendmodelnumber)
+        #     if not os.path.exists(snapshotdir):
+        #         os.mkdir(snapshotdir)
 
-            if G.messages: print()
-            for i, snap in enumerate(G.snapshots):
-                snap.filename = os.path.abspath(os.path.join(snapshotdir, snap.basefilename + '.vti'))
-                pbar = tqdm(total=snap.vtkdatawritesize, leave=True, unit='byte', unit_scale=True, desc='Writing snapshot file {} of {}, {}'.format(i + 1, len(G.snapshots), os.path.split(snap.filename)[1]), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
-                snap.write_vtk_imagedata(pbar, G)
-                pbar.close()
-            if G.messages: print()
+        #     if G.messages: print()
+        #     for i, snap in enumerate(G.snapshots):
+        #         snap.filename = os.path.abspath(os.path.join(snapshotdir, snap.basefilename + '.vti'))
+        #         pbar = tqdm(total=snap.vtkdatawritesize, leave=True, unit='byte', unit_scale=True, desc='Writing snapshot file {} of {}, {}'.format(i + 1, len(G.snapshots), os.path.split(snap.filename)[1]), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
+        #         snap.write_vtk_imagedata(pbar, G)
+        #         pbar.close()
+        #     if G.messages: print()
 
         if G.messages:
             if G.gpu is None:
@@ -429,6 +436,20 @@ def solve_cpu(currentmodelrun, modelend, G):
         for snap in G.snapshots:
             if snap.time == iteration + 1:
                 snap.store(G)
+
+                # write immediately
+                pbar = tqdm(
+                    total=snap.vtkdatawritesize, leave=False, unit='byte', unit_scale=True,
+                    desc='Writing snapshot {}'.format(os.path.split(snap.filename)[1]),
+                    ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars
+                )
+                snap.write_vtk_imagedata(pbar, G)
+                pbar.close()
+
+                # free snapshot buffers so they don't accumulate
+                snap.electric = None
+                snap.magnetic = None
+                snap.written = True
 
         # Update magnetic field components
         update_magnetic(G.nx, G.ny, G.nz, G.nthreads, G.updatecoeffsH, G.ID, G.Ex, G.Ey, G.Ez, G.Hx, G.Hy, G.Hz)

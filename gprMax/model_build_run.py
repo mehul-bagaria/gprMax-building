@@ -382,20 +382,14 @@ def run_model(args, currentmodelrun, modelend, numbermodelruns, inputfile, usern
         # Write an output file in HDF5 format
         write_hdf5_outputfile(outputfile, G)
 
-        # Write any snapshots to file
-        # if G.snapshots:
-        #     # Create directory and construct filename from user-supplied name and model run number
-        #     snapshotdir = os.path.join(G.inputdirectory, os.path.splitext(G.inputfilename)[0] + '_snaps' + appendmodelnumber)
-        #     if not os.path.exists(snapshotdir):
-        #         os.mkdir(snapshotdir)
-
-        #     if G.messages: print()
-        #     for i, snap in enumerate(G.snapshots):
-        #         snap.filename = os.path.abspath(os.path.join(snapshotdir, snap.basefilename + '.vti'))
-        #         pbar = tqdm(total=snap.vtkdatawritesize, leave=True, unit='byte', unit_scale=True, desc='Writing snapshot file {} of {}, {}'.format(i + 1, len(G.snapshots), os.path.split(snap.filename)[1]), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
-        #         snap.write_vtk_imagedata(pbar, G)
-        #         pbar.close()
-        #     if G.messages: print()
+        # Write GPU snapshots to file (CPU snapshots are written during solve_cpu via streaming)
+        if G.gpu is not None and G.snapshots:
+            if G.messages: print()
+            for i, snap in enumerate(G.snapshots):
+                pbar = tqdm(total=snap.vtkdatawritesize, leave=True, unit='byte', unit_scale=True, desc='Writing snapshot file {} of {}, {}'.format(i + 1, len(G.snapshots), os.path.split(snap.filename)[1]), ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars)
+                snap.write_vtk_imagedata(pbar, G)
+                pbar.close()
+            if G.messages: print()
 
         if G.messages:
             if G.gpu is None:

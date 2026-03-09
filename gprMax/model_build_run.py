@@ -623,6 +623,7 @@ def solve_gpu(currentmodelrun, modelend, G):
                               block=(1, 1, 1), grid=(round32(len(G.rxs)), 1, 1))
 
         # Store any snapshots
+        snapshots_streamed = False
         for i, snap in enumerate(G.snapshots):
             if snap.time == iteration + 1:
                 if not G.snapsgpu2cpu:
@@ -636,6 +637,8 @@ def solve_gpu(currentmodelrun, modelend, G):
                                        snapEx_gpu.gpudata, snapEy_gpu.gpudata, snapEz_gpu.gpudata,
                                        snapHx_gpu.gpudata, snapHy_gpu.gpudata, snapHz_gpu.gpudata,
                                        block=Snapshot.tpb, grid=Snapshot.bpg)
+                    gpu_get_snapshot_array(snapEx_gpu.get(), snapEy_gpu.get(), snapEz_gpu.get(),
+                                           snapHx_gpu.get(), snapHy_gpu.get(), snapHz_gpu.get(), i, snap)
                 else:
                     store_snapshot_gpu(np.int32(0), np.int32(snap.xs),
                                        np.int32(snap.xf), np.int32(snap.ys),
@@ -649,6 +652,19 @@ def solve_gpu(currentmodelrun, modelend, G):
                                        block=Snapshot.tpb, grid=Snapshot.bpg)
                     gpu_get_snapshot_array(snapEx_gpu.get(), snapEy_gpu.get(), snapEz_gpu.get(),
                                            snapHx_gpu.get(), snapHy_gpu.get(), snapHz_gpu.get(), 0, snap)
+
+                pbar = tqdm(
+                    total=snap.vtkdatawritesize, leave=False, unit='byte', unit_scale=True,
+                    desc='Writing snapshot {}'.format(os.path.split(snap.filename)[1]),
+                    ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars
+                )
+                snap.write_vtk_imagedata(pbar, G)
+                pbar.close()
+
+                snap.electric = None
+                snap.magnetic = None
+                snap.written = True
+                snapshots_streamed = True
 
         # Update magnetic field components
         update_h_gpu(np.int32(G.nx), np.int32(G.ny), np.int32(G.nz),
@@ -721,7 +737,7 @@ def solve_gpu(currentmodelrun, modelend, G):
         gpu_get_rx_array(rxs_gpu.get(), rxcoords_gpu.get(), G)
 
     # Copy data from any snapshots back to correct snapshot objects
-    if G.snapshots and not G.snapsgpu2cpu:
+    if G.snapshots and not G.snapsgpu2cpu and not snapshots_streamed:
         for i, snap in enumerate(G.snapshots):
             gpu_get_snapshot_array(snapEx_gpu.get(), snapEy_gpu.get(), snapEz_gpu.get(),
                                    snapHx_gpu.get(), snapHy_gpu.get(), snapHz_gpu.get(), i, snap)

@@ -443,7 +443,7 @@ def solve_cpu(currentmodelrun, modelend, G):
                     desc='Writing snapshot {}'.format(os.path.split(snap.filename)[1]),
                     ncols=get_terminal_width() - 1, file=sys.stdout, disable=not G.progressbars
                 )
-                snap.write_vtk_imagedata(pbar, G)
+                # snap.write_vtk_imagedata(pbar, G)
                 pbar.close()
 
                 # free snapshot buffers so they don't accumulate
